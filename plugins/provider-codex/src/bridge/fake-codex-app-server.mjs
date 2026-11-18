@@ -558,6 +558,7 @@ async function handleRequest(message) {
         replayLastTurnUsage(params.threadId);
       }
       respond(id, {
+        modelProvider: script?.resumedModelProvider,
         thread: {
           id: params.threadId,
           ...(script?.resumedDaybreakEnabled === undefined
@@ -593,7 +594,10 @@ async function handleRequest(message) {
       const threadId = replaysUsage
         ? `usage-replay-fork-${processInstanceId}-${threadCounter}`
         : `codex-fx-${processInstanceId}-fork-${threadCounter}`;
-      respond(id, { thread: { id: threadId } });
+      respond(id, {
+        modelProvider: params.modelProvider,
+        thread: { id: threadId },
+      });
 
       if (replaysUsage) {
         replayLastTurnUsage(threadId);

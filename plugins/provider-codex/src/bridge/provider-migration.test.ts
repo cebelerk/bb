@@ -13,7 +13,10 @@ it.each([
       modelProvider: source,
       currentModelProvider: target,
     });
-    const migrated = { thread: { id: "continued-history" } };
+    const migrated = {
+      modelProvider: target,
+      thread: { id: "continued-history" },
+    };
     const request = vi
       .fn()
       .mockRejectedValueOnce(error)
@@ -29,6 +32,7 @@ it.each([
         method: "thread/resume",
         params,
         request,
+        poolSelected: false,
         currentProvider: async () => "openai",
       }),
     ).toBe(migrated);
@@ -78,6 +82,7 @@ it.each([
         method,
         params: { threadId: "original" },
         request,
+        poolSelected: false,
         currentProvider: async () => "openai",
       }),
     ).rejects.toBe(error);
@@ -101,6 +106,7 @@ it("returns a failed migration without starting an empty session", async () => {
       method: "thread/resume",
       params: { threadId: "original" },
       request,
+      poolSelected: false,
       currentProvider: async () => "openai",
     }),
   ).rejects.toThrow("fork unavailable");
@@ -116,12 +122,16 @@ it("preserves pool history when direct login no longer configures the pool", asy
         modelProvider: "bb-account-pool",
       }),
     )
-    .mockResolvedValueOnce({ thread: { id: "direct-copy" } });
+    .mockResolvedValueOnce({
+      modelProvider: "openai",
+      thread: { id: "direct-copy" },
+    });
   const currentProvider = vi.fn().mockResolvedValue("openai");
   await resumeWithProviderMigration({
     method: "thread/resume",
     params: { threadId: "pool-history" },
     request,
+    poolSelected: false,
     currentProvider,
   });
   expect(currentProvider).toHaveBeenCalledTimes(1);
@@ -143,6 +153,7 @@ it("does not migrate a missing pool to a different custom provider", async () =>
       method: "thread/resume",
       params: { threadId: "pool-history" },
       request,
+      poolSelected: false,
       currentProvider: async () => "custom",
     }),
   ).rejects.toBe(error);
@@ -158,6 +169,7 @@ it("preserves non-RPC failures without attempting migration", async () => {
       method: "thread/resume",
       params: { threadId: "original" },
       request,
+      poolSelected: false,
       currentProvider,
     }),
   ).rejects.toBe(error);
@@ -178,6 +190,7 @@ it("propagates a failed effective-config read without forking", async () => {
       method: "thread/resume",
       params: { threadId: "original" },
       request,
+      poolSelected: false,
       currentProvider: async () => {
         throw error;
       },
@@ -195,9 +208,44 @@ it("returns a successful resume without inspecting provider configuration", asyn
       method: "thread/resume",
       params: { threadId: "original" },
       request,
+      poolSelected: false,
       currentProvider,
     }),
   ).resolves.toBe(result);
   expect(request).toHaveBeenCalledTimes(1);
   expect(currentProvider).not.toHaveBeenCalled();
+});
+
+it("rejects a fork that returned the original provider", async () => {
+  const local = { modelProvider: "openai", thread: { id: "original" } };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce(local)
+    .mockResolvedValueOnce(local);
+  await expect(
+    resumeWithProviderMigration({
+      method: "thread/resume",
+      params: { threadId: "original" },
+      request,
+      poolSelected: true,
+      currentProvider: async () => "bb-account-pool",
+    }),
+  ).rejects.toThrow("could not switch");
+});
+
+it("reuses an already pooled session", async () => {
+  const pooled = {
+    thread: { id: "original", modelProvider: "bb-account-pool" },
+  };
+  const request = vi.fn().mockResolvedValueOnce(pooled);
+  await expect(
+    resumeWithProviderMigration({
+      method: "thread/resume",
+      params: { threadId: "original" },
+      request,
+      poolSelected: true,
+      currentProvider: async () => "bb-account-pool",
+    }),
+  ).resolves.toBe(pooled);
+  expect(request).toHaveBeenCalledTimes(1);
 });

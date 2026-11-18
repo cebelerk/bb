@@ -379,8 +379,6 @@ export function resolveAppServerLaunch(env: NodeJS.ProcessEnv = process.env): {
     args: [
       ...args,
       "-c",
-      `openai_base_url=${JSON.stringify(poolBaseUrl)}`,
-      "-c",
       'model_provider="bb-account-pool"',
       "-c",
       'model_providers.bb-account-pool.name="OpenAI"',
@@ -1033,10 +1031,12 @@ async function initializeChild(
 
 const codexThreadIdentityResultSchema = z
   .object({
+    modelProvider: z.string().optional(),
     thread: z
       .object({
         id: z.string().min(1),
         daybreakEnabled: z.boolean().nullish().catch(null),
+        modelProvider: z.string().optional(),
       })
       .passthrough(),
   })
@@ -1236,6 +1236,9 @@ async function constructThreadSession(
     })),
   );
   const launchEnv = appServerLaunchEnv(decoded.sessionOptions.envVars);
+  const poolSelected = Boolean(
+    launchEnv[CODEX_POOL_BASE_URL_ENV] && launchEnv[CODEX_POOL_AUTH_TOKEN_ENV],
+  );
   const envHash = environmentHash(decoded.sessionOptions.envVars);
   const session: CodexBridgeSession = {
     bbThreadId: args.threadId,
@@ -1269,9 +1272,7 @@ async function constructThreadSession(
     pendingPreIdentityDeltas: [],
     turnRateLimits: null,
     quotaRecoveryAttempted: false,
-    quotaRecoveryAllowed: !(
-      launchEnv[CODEX_POOL_BASE_URL_ENV] && launchEnv[CODEX_POOL_AUTH_TOKEN_ENV]
-    ),
+    quotaRecoveryAllowed: !poolSelected,
     rebuildBeforeNextTurnReason: null,
     daybreakEnabled: null,
     modelCatalog: null,
@@ -1402,6 +1403,7 @@ async function constructThreadSession(
     const result = await resumeWithProviderMigration({
       method,
       params,
+      poolSelected,
       currentProvider: async () => {
         const result = await connection.request({
           method: "config/read",

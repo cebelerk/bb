@@ -599,3 +599,69 @@ it("publishes the migrated identity when routing changes during a turn", async (
       .at(-1),
   ).toMatchObject({ params: { threadId: migrated } });
 });
+
+it.each([
+  {
+    source: "openai",
+    target: "bb-account-pool",
+    envVars: {
+      CODEX_OPENAI_BASE_URL: "http://127.0.0.1:1/pool/v1",
+      CODEX_POOL_AUTH_TOKEN: "machine-token",
+    },
+  },
+  {
+    source: "bb-account-pool",
+    target: "openai",
+    envVars: { CODEX_OPENAI_BASE_URL: "", CODEX_POOL_AUTH_TOKEN: "" },
+  },
+])(
+  "migrates after a successful resume bound to $source",
+  async ({ source, target, envVars }) => {
+    writeFileSync(
+      scriptPath,
+      JSON.stringify({
+        requestLogPath,
+        resumedModelProvider: source,
+        configRead: { config: { model_provider: target } },
+      }),
+    );
+    harness.sendRequest(1, "thread/resume", {
+      threadId: THREAD_ID,
+      providerThreadId: "source-with-history",
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: { ...FULL_ACCESS_SESSION_OPTIONS, envVars },
+    });
+
+    const result = await harness.waitForResponse(1);
+    expect(result.error).toBeUndefined();
+    const resumed = z
+      .object({ providerThreadId: z.string() })
+      .parse(result.result);
+    expect(resumed.providerThreadId).not.toBe("source-with-history");
+    const requests = readFileSync(requestLogPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        method: "thread/fork",
+        params: expect.objectContaining({
+          threadId: "source-with-history",
+          modelProvider: target,
+          deferGoalContinuation: true,
+        }),
+      }),
+    );
+    expect(harness.messages).toContainEqual(
+      expect.objectContaining({
+        method: "session/replaced",
+        params: expect.objectContaining({
+          threadId: THREAD_ID,
+          providerThreadId: resumed.providerThreadId,
+          contextLost: false,
+        }),
+      }),
+    );
+  },
+);
